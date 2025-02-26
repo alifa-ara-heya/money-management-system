@@ -36,31 +36,55 @@ async function run() {
         const usersCollection = db.collection('users');
 
         //auth (jwt) related apis
-        app.post('/jwt', async (req, res) => {
-            const user = req.body;
 
-            const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
-                expiresIn: '365d',
-            })
-            // console.log(token);
-            res.send({ token })
-        })
 
-        const verifyToken = (req, res, next) => {
-            // console.log('inside verify token', req.headers.authorization);
-            if (!req.headers.authorization) {
-                return res.status(401).send({ message: "Unauthorized Access." })
-            }
-            const token = req.headers.authorization.split(' ')[1];
-
-            jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
-                if (err) {
-                    return res.status(401).send({ message: 'Unauthorized Access' })
+        const verifyToken = async (req, res, next) => {
+            try {
+                if (!req.headers.authorization) {
+                    return res.status(401).send({ message: "Unauthorized Access." });
                 }
-                req.decoded = decoded;
-                next();
-            })
-        }
+
+                const token = req.headers.authorization.split(" ")[1];
+
+                // 🔐 Verify JWT
+                jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, async (err, decoded) => {
+                    if (err) {
+                        return res.status(401).send({ message: "Unauthorized Access" });
+                    }
+
+                    // ✅ Check if the token matches the one stored in the database
+                    const user = await usersCollection.findOne({ _id: decoded.id });
+
+                    if (!user || user.sessionToken !== token) {
+                        return res.status(401).send({ message: "Invalid Session. Please log in again." });
+                    }
+
+                    req.user = decoded;
+                    next();
+                });
+            } catch (error) {
+                console.error("Token verification error:", error);
+                res.status(500).send({ message: "Internal server error" });
+            }
+        };
+
+        app.post("/logout", verifyToken, async (req, res) => {
+            try {
+                // ✅ Remove session token from the database
+                await usersCollection.updateOne(
+                    { _id: req.user.id },
+                    { $unset: { sessionToken: "" } }
+                );
+
+                res.status(200).json({ message: "Logged out successfully" });
+
+            } catch (error) {
+                console.error("Logout error:", error);
+                res.status(500).json({ message: "Internal server error" });
+            }
+        });
+
+
 
         //adding user in DB
         app.post('/users', async (req, res) => {
@@ -105,9 +129,9 @@ async function run() {
 
         app.post("/login", async (req, res) => {
             try {
-                const { identifier, pin } = req.body; // identifier can be email or mobile
+                const { identifier, pin } = req.body;
 
-                // Find user by email OR mobile number
+                // Find user by email or mobile number
                 const user = await usersCollection.findOne({
                     $or: [{ email: identifier }, { mobile: identifier }]
                 });
@@ -122,7 +146,20 @@ async function run() {
                     return res.status(401).json({ message: "Invalid PIN" });
                 }
 
-                // Successful login, return user details
+                // ✅ Generate JWT Token (Session Token)
+                const sessionToken = jwt.sign(
+                    { id: user._id, role: user.role },
+                    process.env.ACCESS_TOKEN_SECRET,
+                    { expiresIn: "365d" }
+                );
+
+                // ✅ Store session token in the database (Invalidate previous sessions)
+                await usersCollection.updateOne(
+                    { _id: user._id },
+                    { $set: { sessionToken: sessionToken } }
+                );
+
+                // ✅ Return JWT to frontend
                 res.status(200).json({
                     message: "Login successful",
                     user: {
@@ -133,6 +170,7 @@ async function run() {
                         role: user.role,
                         balance: user.balance,
                     },
+                    token: sessionToken
                 });
 
             } catch (error) {
@@ -140,6 +178,7 @@ async function run() {
                 res.status(500).json({ message: "Internal server error" });
             }
         });
+
 
 
 

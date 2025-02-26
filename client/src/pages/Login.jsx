@@ -1,12 +1,13 @@
 
 import { useContext, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { AuthContext } from "../providers/AuthProvider";
 import toast from "react-hot-toast";
 import useAxiosPublic from "../hooks/useAxiosPublic";
 
 export default function Login() {
     // const { signIn } = useContext(AuthContext);
+    const navigate = useNavigate();
     const axiosPublic = useAxiosPublic();
     const [formData, setFormData] = useState({
         identifier: "", // Can be email or mobile number
@@ -28,13 +29,18 @@ export default function Login() {
             // const user = result.user;
             // console.log('sign-in user', user);
 
-            // navigate('/dashboard')
+
             // reset();
             const response = await axiosPublic.post("/login", {
                 identifier: formData.identifier, // Can be email or mobile
                 pin: formData.pin,  // Send plain PIN (Backend will compare it)
+
             });
+
+            // ✅ Store JWT in localStorage
+            localStorage.setItem("authToken", response.data.token);
             toast.success("Logged in successfully");
+            navigate('/')
 
             console.log("User Role:", response.data.user.role);
             console.log("Balance:", response.data.user.balance);
